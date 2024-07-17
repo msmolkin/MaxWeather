@@ -11,66 +11,52 @@ Cities covered:
 - Austin, TX
 - Chicago, IL
 
-Author: Michael Smolkin
-Date: 2024-07-17
+
 """
 
+import pyperclip
 import requests
 from bs4 import BeautifulSoup
-import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def get_weather_report(url):
     full_url = f"{url}&format=TXT&version=1&glossary=0"
-    tries = 3
-    for attempt in range(tries):
-        try:
-            response = requests.get(full_url, timeout=10)
-            response.raise_for_status()
-            
-            soup = BeautifulSoup(response.text, 'html.parser')
-            pre_tag = soup.find('pre', class_='glossaryProduct')
-            if pre_tag:
-                return pre_tag.text.strip()
-            else:
-                logging.warning("No data found in the weather report")
-                return None
-        except requests.RequestException as e:
-            if attempt < tries - 1:
-                logging.warning(f"Attempt {attempt + 1} failed: {str(e)}. Retrying...")
-            else:
-                logging.error(f"Failed to fetch data after {tries} attempts: {str(e)}")
-                return None
+    try:
+        response = requests.get(full_url, timeout=10)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        pre_tag = soup.find('pre', class_='glossaryProduct')
+        if pre_tag:
+            return pre_tag.text.strip()
+        else:
+            print("No data found in the weather report")
+            return None
+    except requests.RequestException as e:
+        print(f"Failed to fetch data: {str(e)}")
+        return None
 
 def parse_weather_report(report):
-    # Extract location name
     location_match = re.search(r'\.\.\.THE\s+(.+?)\s+CLIMATE\s+SUMMARY', report)
     location = location_match.group(1) if location_match else "Unknown Location"
 
-    # Extract date
     date_match = re.search(r'FOR\s+(\w+\s+\d{1,2}\s+\d{4})', report)
     date = date_match.group(1) if date_match else None
 
-    # Extract valid_as_of_time
-    valid_time_match = re.search(r'VALID\s+.*?AS\s+OF\s+(\d{4}\s+[AP]M(?:\s+LOCAL\s+TIME)?)', report, re.IGNORECASE)
+    valid_time_match = re.search(r'VALID\s+(?:TODAY\s+)?AS\s+OF\s+(\d{4}\s+(?:AM|PM)(?:\s+LOCAL\s+TIME)?)', report, re.IGNORECASE)
     valid_as_of_time = valid_time_match.group(1) if valid_time_match else None
 
-    # Extract report_time
-    report_time_match = re.search(r'(\d{3,4}\s+(?:A|P)M\s+\w{3}\s+\w{3}\s+\d{1,2}\s+\d{4})', report)
+    report_time_match = re.search(r'(\d{3,4}\s+(?:AM|PM)\s+[A-Z]{3}\s+(?:[A-Z]{3}\s+)?\w{3}\s+\d{1,2}\s+\d{4})', report)
     report_time = report_time_match.group(1) if report_time_match else None
 
-    # Extract maximum temperature
     max_temp_match = re.search(r'MAXIMUM\s+(\d+)\s+(\d{1,4}\s+(?:A|P)M)', report)
     max_temp = {
         "temp": int(max_temp_match.group(1)) if max_temp_match else None,
         "time": max_temp_match.group(2) if max_temp_match else None
     }
 
-    # Standardize time format and include timezone
     timezone_match = re.search(r'\b([CE]DT|EST)\b', report)
     timezone = timezone_match.group(1) if timezone_match else "Unknown"
     
@@ -81,11 +67,18 @@ def parse_weather_report(report):
         if not time_str or not date_str:
             return None
         try:
+            if "LOCAL TIME" in time_str:
+                time_str = time_str.replace("LOCAL TIME", "").strip()
             full_datetime_str = f"{date_str} {time_str}"
-            dt = datetime.strptime(full_datetime_str, "%b %d %Y %I%M %p")
+            dt = datetime.strptime(full_datetime_str, "%B %d %Y %I%M %p")
             return pytz_timezone.localize(dt).isoformat()
         except ValueError:
-            return None
+            try:
+                # Try alternative format for report_time
+                dt = datetime.strptime(time_str, "%I%M %p %Z %a %b %d %Y")
+                return pytz_timezone.localize(dt).isoformat()
+            except ValueError:
+                return None
 
     return {
         "location": location,
@@ -99,16 +92,17 @@ def parse_weather_report(report):
         "timezone": timezone
     }
 
+from time import sleep
 def process_location(url):
     report = get_weather_report(url)
     if report:
         parsed_data = parse_weather_report(report)
-        logging.info(f"Processed data for {parsed_data['location']}:")
-        logging.info(parsed_data)
-        return parsed_data
+        print(f"Processed data for {parsed_data['location']}:")
+        print(parsed_data)
+        pyperclip.copy(report)
+        sleep(5)
     else:
-        logging.error(f"Failed to process location: {url}")
-        return None
+        print(f"Failed to process location: {url}")
 
 def main():
     locations = [
