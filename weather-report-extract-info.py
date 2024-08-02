@@ -14,7 +14,6 @@ Cities covered:
 
 """
 
-import pyperclip
 import requests
 from bs4 import BeautifulSoup
 import re
@@ -45,13 +44,13 @@ def parse_weather_report(report):
     date_match = re.search(r'FOR\s+(\w+\s+\d{1,2}\s+\d{4})', report)
     date = date_match.group(1) if date_match else None
 
-    valid_time_match = re.search(r'VALID\s+(?:TODAY\s+)?AS\s+OF\s+(\d{4}\s+(?:AM|PM)(?:\s+LOCAL\s+TIME)?)', report, re.IGNORECASE)
+    valid_time_match = re.search(r'VALID\s+(?:TODAY\s+)?AS\s+OF\s+(\d{3,4}\s+(?:AM|PM)(?:\s+LOCAL\s+TIME)?)', report, re.IGNORECASE)
     valid_as_of_time = valid_time_match.group(1) if valid_time_match else None
 
-    report_time_match = re.search(r'(\d{3,4}\s+(?:AM|PM)\s+[A-Z]{3}\s+(?:[A-Z]{3}\s+)?\w{3}\s+\d{1,2}\s+\d{4})', report)
+    report_time_match = re.search(r'(\d{3,4}\s+(?:AM|PM)\s+[A-Z]{3}(?:\s+[A-Z]{3})?\s+\w{3}\s+\d{1,2}\s+\d{4})', report)
     report_time = report_time_match.group(1) if report_time_match else None
 
-    max_temp_match = re.search(r'MAXIMUM\s+(\d+)\s+(\d{1,4}\s+(?:A|P)M)', report)
+    max_temp_match = re.search(r'MAXIMUM\s+(\d+)(?:\s+|.{1,10})(\d{1,2}:\d{2}\s+(?:AM|PM))', report)
     max_temp = {
         "temp": int(max_temp_match.group(1)) if max_temp_match else None,
         "time": max_temp_match.group(2) if max_temp_match else None
@@ -70,15 +69,18 @@ def parse_weather_report(report):
             if "LOCAL TIME" in time_str:
                 time_str = time_str.replace("LOCAL TIME", "").strip()
             full_datetime_str = f"{date_str} {time_str}"
-            dt = datetime.strptime(full_datetime_str, "%B %d %Y %I%M %p")
+            dt = datetime.strptime(full_datetime_str, "%B %d %Y %I:%M %p")
             return pytz_timezone.localize(dt).isoformat()
         except ValueError:
             try:
-                # Try alternative format for report_time
                 dt = datetime.strptime(time_str, "%I%M %p %Z %a %b %d %Y")
                 return pytz_timezone.localize(dt).isoformat()
             except ValueError:
-                return None
+                try:
+                    dt = datetime.strptime(full_datetime_str, "%B %d %Y %I%M %p")
+                    return pytz_timezone.localize(dt).isoformat()
+                except ValueError:
+                    return None
 
     return {
         "location": location,
@@ -92,15 +94,12 @@ def parse_weather_report(report):
         "timezone": timezone
     }
 
-from time import sleep
 def process_location(url):
     report = get_weather_report(url)
     if report:
         parsed_data = parse_weather_report(report)
         print(f"Processed data for {parsed_data['location']}:")
         print(parsed_data)
-        pyperclip.copy(report)
-        sleep(5)
     else:
         print(f"Failed to process location: {url}")
 
