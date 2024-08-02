@@ -7,10 +7,25 @@ import logging
 import os
 from tqdm import tqdm
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+URL_INDEX = 0
 
-def get_weather_report(version):
-    url = f"https://forecast.weather.gov/product.php?site=OKX&issuedby=NYC&product=CLI&format=TXT&version={version}&glossary=0"
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+def create_url_from_location_dict(location):
+        """
+        Create the URL for a given location using the location dictionary.
+
+        Args:
+            location (dict): The dictionary containing the location information.
+
+        Returns:
+            str: The URL for the location's weather reports page.
+        """
+        url = f"https://forecast.weather.gov/product.php?site={location['site']}&issuedby={location['issuedby']}&product={location['product']}&format={location['format']}&version={location['version']}&glossary=0"
+        return url
+
+def get_weather_report(location, version):
+    url = f"https://forecast.weather.gov/product.php?site={location['site']}&issuedby={location['issuedby']}&product={location['product']}&format=TXT&version={version}&glossary=0"
     tries = 3
     for attempt in range(tries):
         try:
@@ -19,8 +34,8 @@ def get_weather_report(version):
             response.raise_for_status()
             download_time = time.time() - start_time
             
-            soup = BeautifulSoup(response.text, 'html.parser')
-            pre_tag = soup.find('pre', class_='glossaryProduct')
+            soup = BeautifulSoup(response.text, "html.parser")
+            pre_tag = soup.find("pre", class_="glossaryProduct")
             if pre_tag:
                 content = pre_tag.text.strip()
                 return content, len(content), download_time
@@ -35,19 +50,27 @@ def get_weather_report(version):
                 logging.error(f"Failed to fetch data for version {version} after {tries} attempts: {str(e)}")
                 return None, 0, 0
 
-def get_total_versions():
-    url = "https://forecast.weather.gov/product.php?site=OKX&issuedby=NYC&product=CLI&format=TXT&version=1&glossary=0"
+def get_total_versions(location_url):
+    """
+    Get the total number of versions available for a given location.
+    
+    Args:
+        location_url (str): The URL of the location's weather reports page.
+        
+    Returns:
+        int: The total number of versions available.
+    """
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(location_url, timeout=10)
         response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
+        soup = BeautifulSoup(response.text, "html.parser")
         
         # Find all divs
-        divs = soup.find_all('div')
+        divs = soup.find_all("div")
         
         # Look for the div that contains "Versions:" text
         for div in divs:
-            if 'Versions:' in div.text:
+            if "Versions:" in div.text:
                 # Find all links within this div
                 links = div.find_all('a')
                 if links:
@@ -76,12 +99,12 @@ def get_optimal_worker_count():
     
     return worker_count
     
-def fetch_reports(versions):
+def fetch_reports(location, versions):
     max_workers = get_optimal_worker_count()
     logging.info(f"Using {max_workers} workers for fetching reports")
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_version = {executor.submit(get_weather_report, version): version for version in versions}
+        future_to_version = {executor.submit(get_weather_report, location, version): version for version in versions}
         results = {}
         total_bytes = 0
         total_time = 0
@@ -110,16 +133,52 @@ def fetch_reports(versions):
     return results
 
 def main():
+    # Create a menu of locations
+    locations = {
+        "New York": {"site": "OKX", "issuedby": "NYC", "product": "CLI",
+                      "format": "TXT",  "version": 1,
+                      "file_name": "weather_reports_OKX_NewYork.txt"},
+         "Austin":   {"site": "EWX", "issuedby": "AUS", "product": "CLI",
+                      "format": "TXT","version": 1, "location": "Austin",
+                      "file_name": "weather_reports_EWX_Austin.txt"},
+         "Chicago":  {"site": "LOT", "issuedby": "MDW", "product": "CLI",
+                      "format": "TXT", "version": 1,
+                      "file_name": "weather_reports_LOT_Chicago.txt"},
+         "Miami":   {"site": "MFL", "issuedby": "MIA", "product": "CLI",
+                     "format": "TXT", "version": 1,
+                     "file_name": "weather_reports_MFL_Miami.txt"}
+    }
+    # Ask user to select a location
+    print("Select a location:")
+    for i, location in enumerate(locations, 1):
+        print(f"{i}. {location}")
+    
+    choice = input("Enter the number corresponding to the location: ")
+    try:
+        choice = int(choice)
+        if 1 <= choice <= len(locations):
+            location = list(locations.keys())[choice - 1]
+            print(f"Selected location: {location}")
+            location = locations[location]
+        else:
+            logging.error("Invalid choice. Exiting.")
+            return
+    except ValueError:
+        logging.error("Invalid choice. Exiting.")
+        return
+    
+    
     start_time = time.time()
     
-    total_versions = get_total_versions()
+    total_versions = get_total_versions(create_url_from_location_dict(location))
+    
     if total_versions == 0:
         logging.error("Failed to determine the number of versions. Exiting.")
         return
 
     logging.info(f"Total versions to download: {total_versions}")
-
-    all_reports = fetch_reports(range(1, total_versions + 1))
+    
+    all_reports = fetch_reports(location, range(1, total_versions + 1))
 
     # Sort reports by version number
     sorted_reports = [f"<version_{v}>\n{all_reports[v]}\n</version_{v}>" for v in sorted(all_reports.keys())]
@@ -136,4 +195,7 @@ def main():
     logging.info(f"Total execution time: {time.time() - start_time:.2f} seconds")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        logging.error("Program exited due to keyboard interrupt.")
